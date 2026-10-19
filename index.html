@@ -20,6 +20,10 @@ button:disabled{background:#9db5b1;cursor:default}
 #etat{font-weight:600;color:var(--accent-f)}
 #tps{font-weight:600;font-variant-numeric:tabular-nums}
 #tps.fin{color:#a02020}
+.col h2 b{flex:1}
+.outils{display:inline-flex;gap:2px;margin-left:8px}
+.sup:disabled{background:transparent;opacity:.3;cursor:default}
+.col h2 input{font:inherit;font-weight:600;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;width:100%}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #board{flex:1;display:flex;gap:12px;padding:12px;overflow-x:auto;align-items:flex-start}
 .col{flex:0 0 260px;max-height:100%;display:flex;flex-direction:column;background:var(--col);border:1px solid var(--trait);border-radius:6px}
@@ -43,7 +47,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v6</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v7</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
@@ -145,6 +149,40 @@ function tick() {
 }
 setInterval(tick, 1000);
 
+function outils(name, i, names, total) {
+  const o = el('span', 'outils');
+  const mk = (txt, titre, fn, off) => { const b = el('button', 'sup', txt); b.title = titre; b.disabled = !!off; b.onclick = fn; return b; };
+  const save = arr => { cols = arr; grist.setOption('cols', arr); render(); };
+  const echange = d => { const a = [...names]; [a[i + d], a[i]] = [a[i], a[i + d]]; save(a); };
+  o.append(
+    mk('\u25C0', 'Déplacer à gauche', () => echange(-1), i === 0),
+    mk('\u25B6', 'Déplacer à droite', () => echange(1), i === names.length - 1),
+    mk('\u270E', 'Renommer', e => renommer(e, name, names, save)),
+    mk('\u00D7', 'Supprimer (catégorie vide uniquement)', () => {
+      if (total) return say('Cette catégorie contient des idées : déplace-les d\u2019abord.');
+      save(names.filter(n => n !== name));
+    })
+  );
+  return o;
+}
+
+function renommer(e, name, names, save) {
+  const nom = e.target.closest('h2').querySelector('b');
+  const inp = el('input'); inp.value = name; nom.replaceWith(inp); inp.focus(); inp.select();
+  let fait = false;
+  const ok = () => {
+    if (fait) return; fait = true;
+    const n = inp.value.trim();
+    if (!n || n === name) return render();
+    if (names.includes(n)) { say('Cette catégorie existe déjà.'); return render(); }
+    const ids = recs.filter(r => (r.Colonne || names[0]) === name).map(r => r.id);
+    save(names.map(x => x === name ? n : x));
+    if (ids.length) act(t => ids.map(id => ['UpdateRecord', t, id, raw({ Colonne: n })])).catch(erreur);
+  };
+  inp.onkeydown = ev => { if (ev.key === 'Enter') ok(); if (ev.key === 'Escape') { fait = true; render(); } };
+  inp.onblur = ok;
+}
+
 function allCols() {
   const extra = [...new Set(recs.map(r => r.Colonne).filter(Boolean))].filter(c => !cols.includes(c));
   return [...cols, ...extra];
@@ -160,7 +198,8 @@ function render() {
     const mine = recs.filter(r => visible(r) && (r.Colonne || names[0]) === name)
       .sort((a, b) => phase === 'vote' ? voters(b).length - voters(a).length : a.id - b.id);
     const col = el('section', 'col');
-    const h = el('h2', null, name); h.append(el('span', null, mine.length));
+    const h = el('h2'); h.append(el('b', null, name), el('span', null, mine.length));
+    if (anim) h.append(outils(name, i, names, recs.filter(r => (r.Colonne || names[0]) === name).length));
     const list = el('div', 'cards');
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
     col.addEventListener('dragleave', () => col.classList.remove('over'));
