@@ -57,7 +57,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v10</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v11</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
@@ -263,7 +263,8 @@ async function joindre(r, files) {
   try {
     const a = await api(), fd = new FormData();
     [...files].forEach(f => fd.append('upload', f));
-    const res = await fetch(`${a.base}/attachments?auth=${a.token}`, { method: 'POST', body: fd });
+    const res = await fetch(`${a.base}/attachments?auth=${a.token}`, { method: 'POST', body: fd })
+      .catch(e => { throw new Error('requête bloquée vers ' + a.base.split('/api/')[0] + ' (' + e.message + ')'); });
     if (!res.ok) throw new Error('envoi refusé (' + res.status + ')');
     const nouveaux = await res.json();
     await upd(r.id, { PJ: ['L', ...ids(r.PJ), ...nouveaux] });
