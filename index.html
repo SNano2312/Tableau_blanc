@@ -53,12 +53,13 @@ const $ = s => document.querySelector(s);
 const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
 const voters = r => (r.Votants || '').split(',').map(s => s.trim()).filter(Boolean);
 const T = () => grist.selectedTable;
-const upd = (id, f) => T().update({ id, fields: grist.mapColumnNamesBack(f) });
-const say = t => { $('#msg').textContent = t || ''; if (t) setTimeout(() => $('#msg').textContent = '', 4000); };
+const say = t => { $('#msg').textContent = t || ''; if (t) setTimeout(() => $('#msg').textContent = '', 6000); };
+const erreur = e => say('Écriture impossible : ' + (e && e.message || e));
+const upd = (id, f) => T().update({ id, fields: grist.mapColumnNamesBack(f) }).catch(erreur);
 const mesVotes = () => recs.filter(r => voters(r).includes(me)).length;
 
 grist.ready({
-  requiredAccess: 'read table',
+  requiredAccess: 'full',
   columns: [
     { name: 'Texte', title: 'Texte', type: 'Text' },
     { name: 'Colonne', title: 'Colonne', type: 'Text' },
@@ -113,7 +114,7 @@ function render() {
     b.onclick = () => {
       if (!me) { $('#pseudo').focus(); return say('Indique ton prénom avant d\u2019ajouter une idée.'); }
       const t = ta.value.trim(); if (!t) return;
-      T().create({ fields: grist.mapColumnNamesBack({ Texte: t, Colonne: name, Auteur: me, Votants: '' }) });
+      T().create({ fields: grist.mapColumnNamesBack({ Texte: t, Colonne: name, Auteur: me, Votants: '' }) }).catch(erreur);
       ta.value = '';
     };
     ajout.append(ta, b);
@@ -139,7 +140,7 @@ function card(r) {
   m.append(bv);
   if (r.Auteur && r.Auteur === me) {
     const s = el('button', 'sup', '\u00D7'); s.title = 'Supprimer mon idée';
-    s.onclick = () => T().destroy(r.id);
+    s.onclick = () => T().destroy(r.id).catch(erreur);
     m.append(s);
   }
   c.append(m);
