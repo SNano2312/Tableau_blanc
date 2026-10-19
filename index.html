@@ -18,6 +18,8 @@ button:hover{background:var(--accent-f)}
 button:disabled{background:#9db5b1;cursor:default}
 #ctrl{display:inline-flex;gap:6px;align-items:center}
 #etat{font-weight:600;color:var(--accent-f)}
+#tps{font-weight:600;font-variant-numeric:tabular-nums}
+#tps.fin{color:#a02020}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #board{flex:1;display:flex;gap:12px;padding:12px;overflow-x:auto;align-items:flex-start}
 .col{flex:0 0 260px;max-height:100%;display:flex;flex-direction:column;background:var(--col);border:1px solid var(--trait);border-radius:6px}
@@ -41,12 +43,13 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v5</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v6</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
   <span id="ctrl"></span>
   <span id="etat"></span>
+  <span id="tps"></span>
   <span id="votes"></span>
 </header>
 <div id="msg" role="status"></div>
@@ -56,6 +59,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 const MAX_VOTES = 3;           // votes par personne
 let recs = [], cols = [], me = localStorage.getItem('bs_me') || '';
 const PHASES = { ecriture: 'Écriture', decouverte: 'Découverte', vote: 'Vote' };
+let fin = 0; // heure de fin du minuteur (ms), 0 = arrêté
 let phase = 'ecriture', anon = false, anim = localStorage.getItem('bs_anim') === '1';
 // En phase Écriture, chacun ne voit que ses propres idées
 const visible = r => phase !== 'ecriture' || (r.Auteur && r.Auteur === me);
@@ -88,6 +92,7 @@ grist.onOptions(o => {
   cols = o.cols || [];
   phase = PHASES[o.phase] ? o.phase : 'ecriture';
   anon = !!o.anon;
+  fin = Number(o.fin) || 0;
   render();
 });
 
@@ -121,7 +126,24 @@ function entete() {
   const l = el('label'), cb = el('input'); cb.type = 'checkbox'; cb.checked = anon;
   cb.onchange = () => grist.setOption('anon', cb.checked);
   l.append(cb, ' Anonyme'); c.append(l);
+  const mn = el('input'); mn.type = 'number'; mn.min = 1; mn.max = 120; mn.style.width = '60px';
+  mn.value = localStorage.getItem('bs_min') || 5; mn.title = 'Durée en minutes';
+  mn.oninput = () => localStorage.setItem('bs_min', mn.value);
+  const go = el('button', null, 'Lancer');
+  go.onclick = () => grist.setOption('fin', Date.now() + Math.max(1, Number(mn.value) || 5) * 60000);
+  const st = el('button', null, 'Arrêter'); st.onclick = () => grist.setOption('fin', 0);
+  c.append(mn, ' min', go, st);
 }
+
+function tick() {
+  const t = $('#tps');
+  if (!fin) { t.textContent = ''; t.classList.remove('fin'); return; }
+  const s = Math.round((fin - Date.now()) / 1000);
+  if (s <= 0) { t.textContent = 'Temps écoulé'; t.classList.add('fin'); return; }
+  t.textContent = '\u23F1 ' + Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  t.classList.remove('fin');
+}
+setInterval(tick, 1000);
 
 function allCols() {
   const extra = [...new Set(recs.map(r => r.Colonne).filter(Boolean))].filter(c => !cols.includes(c));
@@ -130,7 +152,7 @@ function allCols() {
 
 function render() {
   const board = $('#board'); board.textContent = '';
-  entete();
+  entete(); tick();
   $('#votes').textContent = me && phase === 'vote' ? `Votes restants : ${MAX_VOTES - mesVotes()} / ${MAX_VOTES}` : '';
   const names = allCols();
   if (!names.length) { board.append(el('div', 'vide', 'Aucune catégorie. Crée la première avec « Ajouter une catégorie ».')); return; }
