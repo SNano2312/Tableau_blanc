@@ -26,6 +26,8 @@ button:disabled{background:#9db5b1;cursor:default}
 .fic{display:inline-flex;align-items:center;background:#fff;border:1px solid var(--trait);border-radius:3px;padding:0 4px;max-width:100%}
 .fic a{color:var(--accent-f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pj .sup{padding:0 4px}
+.ajoutlien{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
+.ajoutlien input{font:inherit;padding:4px;border:1px solid var(--trait);border-radius:3px}
 #pan{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px}
 #pan[hidden]{display:none}
 .boite{background:#fff;border-radius:6px;width:min(720px,100%);max-height:100%;display:flex;flex-direction:column;gap:8px;padding:12px}
@@ -57,7 +59,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v11</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v12</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
@@ -109,7 +111,8 @@ grist.ready({
     { name: 'Colonne', title: 'Catégorie', type: 'Text' },
     { name: 'Auteur', title: 'Auteur', type: 'Text' },
     { name: 'Votants', title: 'Votants', type: 'Text' },
-    { name: 'PJ', title: 'Pièces jointes', type: 'Attachments', optional: true }
+    { name: 'PJ', title: 'Pièces jointes', type: 'Attachments', optional: true },
+    { name: 'Liens', title: 'Liens (documents)', type: 'Text', optional: true }
   ]
 });
 grist.onRecords((rows, m) => { map = m || {}; recs = grist.mapColumnNames(rows) || []; render(); });
@@ -335,12 +338,38 @@ function card(r) {
       }
       z.append(s);
     });
+    if (z.children.length) c.append(z);
+  }
+  if (map.Liens) {   // colonne « Liens » associée : liens vers des documents en ligne
+    const mien = !!r.Auteur && r.Auteur === me, z = el('div', 'pj');
+    const l = (r.Liens || '').split('\n').filter(Boolean);
+    const maj = arr => upd(r.id, { Liens: arr.join('\n') });
+    l.forEach((ligne, k) => {
+      const [nom, url] = ligne.includes('\t') ? ligne.split('\t') : ['', ligne];
+      if (!/^https?:\/\//i.test(url)) return;
+      const s = el('span', 'fic'), a = el('a', null, '\uD83D\uDD17 ' + (nom || url.replace(/^https?:\/\//i, '')));
+      a.href = url; a.target = '_blank'; a.rel = 'noopener noreferrer'; a.title = url;
+      s.append(a);
+      if (mien) {
+        const x = el('button', 'sup', '\u00D7'); x.title = 'Retirer ce lien';
+        x.onclick = () => maj(l.filter((_, j) => j !== k));
+        s.append(x);
+      }
+      z.append(s);
+    });
     if (mien) {
-      const f = el('input'); f.type = 'file'; f.multiple = true; f.hidden = true;
-      f.onchange = () => f.files.length && joindre(r, f.files);
-      const b = el('button', 'sup', '\uD83D\uDCCE+'); b.title = 'Joindre un document';
-      b.onclick = () => f.click();
-      z.append(f, b);
+      const b = el('button', 'sup', '\uD83D\uDD17+'); b.title = 'Ajouter un lien vers un document';
+      b.onclick = () => {
+        const f = el('div', 'ajoutlien'), u = el('input'), n = el('input'), ok = el('button', null, 'OK');
+        u.placeholder = 'https://… (adresse du document)'; n.placeholder = 'Nom affiché (facultatif)';
+        ok.onclick = () => {
+          const url = u.value.trim();
+          if (!/^https?:\/\//i.test(url)) return say('L\u2019adresse doit commencer par http:// ou https://');
+          maj([...l, n.value.trim().replace(/[\t\r\n]+/g, ' ') + '\t' + url]);
+        };
+        f.append(u, n, ok); z.after(f); b.remove();
+      };
+      z.append(b);
     }
     if (z.children.length) c.append(z);
   }
