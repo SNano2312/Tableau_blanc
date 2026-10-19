@@ -15,6 +15,9 @@ header input{font:inherit;padding:5px 8px;border:1px solid var(--trait);border-r
 #votes{margin-left:auto;color:var(--doux)}
 button{font:inherit;cursor:pointer;border:0;border-radius:4px;padding:5px 10px;background:var(--accent);color:#fff}
 button:hover{background:var(--accent-f)}
+button:disabled{background:#9db5b1;cursor:default}
+#ctrl{display:inline-flex;gap:6px;align-items:center}
+#etat{font-weight:600;color:var(--accent-f)}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 #board{flex:1;display:flex;gap:12px;padding:12px;overflow-x:auto;align-items:flex-start}
 .col{flex:0 0 260px;max-height:100%;display:flex;flex-direction:column;background:var(--col);border:1px solid var(--trait);border-radius:6px}
@@ -38,9 +41,12 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v4</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v5</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
+  <label><input type="checkbox" id="isAnim"> Animateur</label>
+  <span id="ctrl"></span>
+  <span id="etat"></span>
   <span id="votes"></span>
 </header>
 <div id="msg" role="status"></div>
@@ -49,6 +55,10 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 <script>
 const MAX_VOTES = 3;           // votes par personne
 let recs = [], cols = [], me = localStorage.getItem('bs_me') || '';
+const PHASES = { ecriture: 'Écriture', decouverte: 'Découverte', vote: 'Vote' };
+let phase = 'ecriture', anon = false, anim = localStorage.getItem('bs_anim') === '1';
+// En phase Écriture, chacun ne voit que ses propres idées
+const visible = r => phase !== 'ecriture' || (r.Auteur && r.Auteur === me);
 const $ = s => document.querySelector(s);
 const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
 const voters = r => (r.Votants || '').split(',').map(s => s.trim()).filter(Boolean);
@@ -73,12 +83,22 @@ grist.ready({
   ]
 });
 grist.onRecords((rows, m) => { map = m || {}; recs = grist.mapColumnNames(rows) || []; render(); });
-grist.onOptions(o => { cols = (o && o.cols) || []; render(); });
+grist.onOptions(o => {
+  o = o || {};
+  cols = o.cols || [];
+  phase = PHASES[o.phase] ? o.phase : 'ecriture';
+  anon = !!o.anon;
+  render();
+});
 
 $('#pseudo').value = me;
 $('#pseudo').addEventListener('change', e => {
   me = e.target.value.replace(/,/g, ' ').trim();
   localStorage.setItem('bs_me', me); render();
+});
+$('#isAnim').addEventListener('change', e => {
+  anim = e.target.checked;
+  localStorage.setItem('bs_anim', anim ? '1' : '0'); render();
 });
 $('#nf').addEventListener('submit', e => {
   e.preventDefault();
@@ -88,6 +108,21 @@ $('#nf').addEventListener('submit', e => {
   $('#ncol').value = ''; render();
 });
 
+function entete() {
+  $('#isAnim').checked = anim;
+  $('#etat').textContent = 'Phase : ' + PHASES[phase] + (anon ? ' (anonyme)' : '');
+  const c = $('#ctrl'); c.textContent = '';
+  if (!anim) return;
+  Object.entries(PHASES).forEach(([k, n]) => {
+    const b = el('button', null, n); b.disabled = k === phase;
+    b.onclick = () => grist.setOption('phase', k);
+    c.append(b);
+  });
+  const l = el('label'), cb = el('input'); cb.type = 'checkbox'; cb.checked = anon;
+  cb.onchange = () => grist.setOption('anon', cb.checked);
+  l.append(cb, ' Anonyme'); c.append(l);
+}
+
 function allCols() {
   const extra = [...new Set(recs.map(r => r.Colonne).filter(Boolean))].filter(c => !cols.includes(c));
   return [...cols, ...extra];
@@ -95,12 +130,13 @@ function allCols() {
 
 function render() {
   const board = $('#board'); board.textContent = '';
-  $('#votes').textContent = me ? `Votes restants : ${MAX_VOTES - mesVotes()} / ${MAX_VOTES}` : '';
+  entete();
+  $('#votes').textContent = me && phase === 'vote' ? `Votes restants : ${MAX_VOTES - mesVotes()} / ${MAX_VOTES}` : '';
   const names = allCols();
   if (!names.length) { board.append(el('div', 'vide', 'Aucune catégorie. Crée la première avec « Ajouter une catégorie ».')); return; }
   names.forEach((name, i) => {
-    const mine = recs.filter(r => (r.Colonne || names[0]) === name)
-      .sort((a, b) => voters(b).length - voters(a).length);
+    const mine = recs.filter(r => visible(r) && (r.Colonne || names[0]) === name)
+      .sort((a, b) => phase === 'vote' ? voters(b).length - voters(a).length : a.id - b.id);
     const col = el('section', 'col');
     const h = el('h2', null, name); h.append(el('span', null, mine.length));
     const list = el('div', 'cards');
@@ -132,7 +168,7 @@ function card(r) {
   const c = el('article', 'card'); c.draggable = true;
   c.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', String(r.id)));
   c.append(el('p', null, r.Texte || ''));
-  const m = el('div', 'meta'); m.append(el('span', 'de', r.Auteur || ''));
+  const m = el('div', 'meta'); m.append(el('span', 'de', anon ? (r.Auteur === me ? 'Moi' : '') : (r.Auteur || '')));
   const v = voters(r), aVote = v.includes(me);
   const bv = el('button', 'vote' + (aVote ? ' mine' : ''), '\u25B2 ' + v.length);
   bv.title = aVote ? 'Retirer mon vote' : 'Voter pour cette idée';
@@ -142,7 +178,7 @@ function card(r) {
     const n = aVote ? v.filter(x => x !== me) : [...v, me];
     upd(r.id, { Votants: n.join(',') });
   };
-  m.append(bv);
+  if (phase === 'vote') m.append(bv);
   if (r.Auteur && r.Auteur === me) {
     const s = el('button', 'sup', '\u00D7'); s.title = 'Supprimer mon idée';
     s.onclick = () => del(r.id);
