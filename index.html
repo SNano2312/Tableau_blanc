@@ -55,7 +55,7 @@ const voters = r => (r.Votants || '').split(',').map(s => s.trim()).filter(Boole
 const T = () => grist.selectedTable;
 const say = t => { $('#msg').textContent = t || ''; if (t) setTimeout(() => $('#msg').textContent = '', 6000); };
 const erreur = e => say('Écriture impossible : ' + (e && e.message || e));
-const upd = (id, f) => T().update({ id, fields: grist.mapColumnNamesBack(f) }).catch(erreur);
+const upd = (id, f) => T().update({ id, fields: f }).catch(erreur);
 const mesVotes = () => recs.filter(r => voters(r).includes(me)).length;
 
 grist.ready({
@@ -114,7 +114,7 @@ function render() {
     b.onclick = () => {
       if (!me) { $('#pseudo').focus(); return say('Indique ton prénom avant d\u2019ajouter une idée.'); }
       const t = ta.value.trim(); if (!t) return;
-      T().create({ fields: grist.mapColumnNamesBack({ Texte: t, Colonne: name, Auteur: me, Votants: '' }) }).catch(erreur);
+      T().create({ fields: { Texte: t, Colonne: name, Auteur: me, Votants: '' } }).catch(erreur);
       ta.value = '';
     };
     ajout.append(ta, b);
