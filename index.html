@@ -22,6 +22,16 @@ button:disabled{background:#9db5b1;cursor:default}
 #tps.fin{color:#a02020}
 .col h2 b{flex:1}
 .outils{display:inline-flex;gap:2px;margin-left:8px}
+.pj{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;font-size:12px;align-items:center}
+.fic{display:inline-flex;align-items:center;background:#fff;border:1px solid var(--trait);border-radius:3px;padding:0 4px;max-width:100%}
+.fic a{color:var(--accent-f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pj .sup{padding:0 4px}
+#pan{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px}
+#pan[hidden]{display:none}
+.boite{background:#fff;border-radius:6px;width:min(720px,100%);max-height:100%;display:flex;flex-direction:column;gap:8px;padding:12px}
+.bar{display:flex;gap:6px;align-items:center}
+.bar b{flex:1}
+#sortie{font:13px/1.4 Consolas,monospace;height:340px;max-height:60vh;padding:8px;border:1px solid var(--trait);border-radius:4px;resize:vertical}
 .sup:disabled{background:transparent;opacity:.3;cursor:default}
 .col h2 input{font:inherit;font-weight:600;padding:2px 4px;border:1px solid var(--accent);border-radius:3px;width:100%}
 button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
@@ -47,17 +57,28 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v7</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v9</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
   <span id="ctrl"></span>
   <span id="etat"></span>
   <span id="tps"></span>
+  <button type="button" id="exp" hidden>Exporter</button>
   <span id="votes"></span>
 </header>
 <div id="msg" role="status"></div>
 <main id="board"></main>
+<div id="pan" hidden>
+  <div class="boite">
+    <div class="bar"><b>Synthèse</b>
+      <button type="button" id="fmtT">Texte</button>
+      <button type="button" id="fmtC">Tableau (Excel)</button>
+      <button type="button" id="cop">Copier</button>
+      <button type="button" id="fer">Fermer</button></div>
+    <textarea id="sortie" readonly aria-label="Synthèse à copier"></textarea>
+  </div>
+</div>
 
 <script>
 const MAX_VOTES = 3;           // votes par personne
@@ -87,7 +108,8 @@ grist.ready({
     { name: 'Texte', title: 'Texte', type: 'Text' },
     { name: 'Colonne', title: 'Catégorie', type: 'Text' },
     { name: 'Auteur', title: 'Auteur', type: 'Text' },
-    { name: 'Votants', title: 'Votants', type: 'Text' }
+    { name: 'Votants', title: 'Votants', type: 'Text' },
+    { name: 'PJ', title: 'Pièces jointes', type: 'Attachments', optional: true }
   ]
 });
 grist.onRecords((rows, m) => { map = m || {}; recs = grist.mapColumnNames(rows) || []; render(); });
@@ -119,6 +141,7 @@ $('#nf').addEventListener('submit', e => {
 
 function entete() {
   $('#isAnim').checked = anim;
+  $('#exp').hidden = !anim;
   $('#etat').textContent = 'Phase : ' + PHASES[phase] + (anon ? ' (anonyme)' : '');
   const c = $('#ctrl'); c.textContent = '';
   if (!anim) return;
@@ -183,6 +206,74 @@ function renommer(e, name, names, save) {
   inp.onblur = ok;
 }
 
+function synthese(fmt) {
+  const names = allCols();
+  const aut = r => anon ? '' : (r.Auteur || '');
+  const tri = (a, b) => voters(b).length - voters(a).length || a.id - b.id;
+  const dans = n => recs.filter(r => (r.Colonne || names[0]) === n).sort(tri);
+  const l = [];
+  if (fmt === 'tableau') {
+    const c = s => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ');
+    l.push(['Catégorie', 'Idée', 'Votes', ...(anon ? [] : ['Auteur'])].join('\t'));
+    names.forEach(n => dans(n).forEach(r =>
+      l.push([n, c(r.Texte), voters(r).length, ...(anon ? [] : [c(aut(r))])].join('\t'))));
+    return l.join('\n');
+  }
+  names.forEach(n => {
+    const d = dans(n);
+    l.push(`${n} (${d.length})`);
+    d.forEach(r => l.push(`- ${r.Texte} [${voters(r).length} vote${voters(r).length > 1 ? 's' : ''}]${aut(r) ? ' \u2014 ' + aut(r) : ''}`));
+    l.push('');
+  });
+  return l.join('\n').trim();
+}
+let fmtSortie = 'texte';
+const montre = f => { fmtSortie = f; $('#sortie').value = synthese(f); $('#pan').hidden = false; };
+const flash = t => { $('#cop').textContent = t; setTimeout(() => $('#cop').textContent = 'Copier', 2500); };
+$('#exp').onclick = () => montre(fmtSortie);
+$('#fmtT').onclick = () => montre('texte');
+$('#fmtC').onclick = () => montre('tableau');
+$('#fer').onclick = () => $('#pan').hidden = true;
+$('#cop').onclick = async () => {
+  const t = $('#sortie'); t.select();
+  try { await navigator.clipboard.writeText(t.value); flash('Copié \u2713'); }
+  catch (e) { flash(document.execCommand('copy') ? 'Copié \u2713' : 'Ctrl+C pour copier'); }
+};
+
+// ---- Pièces jointes (API REST de Grist, jeton temporaire) ----
+let tok = null; const noms = {};
+async function api() {
+  if (!tok || Date.now() > tok.exp) {
+    const t = await grist.docApi.getAccessToken({ readOnly: false });
+    tok = { base: t.baseUrl, token: t.token, exp: Date.now() + (t.ttlMsecs || 60000) - 5000 };
+  }
+  return tok;
+}
+const ids = v => (Array.isArray(v) ? v : []).filter(x => typeof x === 'number');
+async function charger(i) {   // récupère le nom du fichier
+  if (i in noms) return; noms[i] = '\u2026';
+  try {
+    const a = await api();
+    const r = await fetch(`${a.base}/attachments/${i}`, { headers: { Authorization: 'Bearer ' + a.token } });
+    noms[i] = (await r.json()).fileName || ('Fichier ' + i);
+  } catch (e) { noms[i] = 'Fichier ' + i; }
+  render();
+}
+async function joindre(r, files) {
+  try {
+    const a = await api(), fd = new FormData();
+    [...files].forEach(f => fd.append('upload', f));
+    const res = await fetch(`${a.base}/attachments`, { method: 'POST', headers: { Authorization: 'Bearer ' + a.token }, body: fd });
+    if (!res.ok) throw new Error('envoi refusé (' + res.status + ')');
+    const nouveaux = await res.json();
+    await upd(r.id, { PJ: ['L', ...ids(r.PJ), ...nouveaux] });
+  } catch (e) { erreur(e); }
+}
+async function ouvrir(i) {
+  try { const a = await api(); window.open(`${a.base}/attachments/${i}/download?auth=${a.token}`, '_blank'); }
+  catch (e) { erreur(e); }
+}
+
 function allCols() {
   const extra = [...new Set(recs.map(r => r.Colonne).filter(Boolean))].filter(c => !cols.includes(c));
   return [...cols, ...extra];
@@ -229,6 +320,29 @@ function card(r) {
   const c = el('article', 'card'); c.draggable = true;
   c.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', String(r.id)));
   c.append(el('p', null, r.Texte || ''));
+  if (map.PJ) {   // colonne « Pièces jointes » associée
+    const mien = !!r.Auteur && r.Auteur === me, pj = ids(r.PJ), z = el('div', 'pj');
+    pj.forEach(i => {
+      charger(i);
+      const s = el('span', 'fic'), a = el('a', null, '\uD83D\uDCCE ' + (noms[i] || ''));
+      a.href = '#'; a.onclick = e => { e.preventDefault(); ouvrir(i); };
+      s.append(a);
+      if (mien) {
+        const x = el('button', 'sup', '\u00D7'); x.title = 'Retirer cette pièce jointe';
+        x.onclick = () => upd(r.id, { PJ: ['L', ...pj.filter(k => k !== i)] });
+        s.append(x);
+      }
+      z.append(s);
+    });
+    if (mien) {
+      const f = el('input'); f.type = 'file'; f.multiple = true; f.hidden = true;
+      f.onchange = () => f.files.length && joindre(r, f.files);
+      const b = el('button', 'sup', '\uD83D\uDCCE+'); b.title = 'Joindre un document';
+      b.onclick = () => f.click();
+      z.append(f, b);
+    }
+    if (z.children.length) c.append(z);
+  }
   const m = el('div', 'meta'); m.append(el('span', 'de', anon ? (r.Auteur === me ? 'Moi' : '') : (r.Auteur || '')));
   const v = voters(r), aVote = v.includes(me);
   const bv = el('button', 'vote' + (aVote ? ' mine' : ''), '\u25B2 ' + v.length);
