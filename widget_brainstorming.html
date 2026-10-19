@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Brainstorming</title>
+<script src="https://docs.getgrist.com/grist-plugin-api.js"></script>
+<style>
+:root{--fond:#eef2f0;--col:#f9fbfa;--encre:#1d2b28;--doux:#5d706b;--accent:#0a7c72;--accent-f:#065a53;--post:#fff6c9;--trait:#d3dcd9}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.4 "Segoe UI",system-ui,sans-serif;color:var(--encre);background:var(--fond);height:100vh;display:flex;flex-direction:column}
+header{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 14px;background:#fff;border-bottom:1px solid var(--trait)}
+header b{font-size:16px}
+header input{font:inherit;padding:5px 8px;border:1px solid var(--trait);border-radius:4px}
+#votes{margin-left:auto;color:var(--doux)}
+button{font:inherit;cursor:pointer;border:0;border-radius:4px;padding:5px 10px;background:var(--accent);color:#fff}
+button:hover{background:var(--accent-f)}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#board{flex:1;display:flex;gap:12px;padding:12px;overflow-x:auto;align-items:flex-start}
+.col{flex:0 0 260px;max-height:100%;display:flex;flex-direction:column;background:var(--col);border:1px solid var(--trait);border-radius:6px}
+.col.over{border-color:var(--accent);background:#e3f1ee}
+.col h2{margin:0;padding:10px 12px;font-size:14px;border-bottom:1px solid var(--trait);display:flex;justify-content:space-between}
+.col h2 span{color:var(--doux);font-weight:400}
+.cards{padding:8px;overflow-y:auto;display:flex;flex-direction:column;gap:8px;min-height:40px}
+.card{background:var(--post);padding:8px 10px;border-radius:3px;box-shadow:0 1px 2px rgba(0,0,0,.18);cursor:grab}
+.card p{margin:0 0 6px;white-space:pre-wrap;overflow-wrap:anywhere}
+.meta{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--doux)}
+.meta .de{flex:1}
+.vote{background:transparent;color:var(--accent-f);border:1px solid var(--accent);padding:1px 8px}
+.vote.mine{background:var(--accent);color:#fff}
+.sup{background:transparent;color:var(--doux);padding:0 6px;font-size:16px}
+.sup:hover{background:transparent;color:#a02020}
+.ajout{padding:8px;border-top:1px solid var(--trait);display:flex;flex-direction:column;gap:6px}
+.ajout textarea{font:inherit;resize:vertical;min-height:44px;padding:6px;border:1px solid var(--trait);border-radius:4px}
+#msg{padding:6px 14px;color:#a02020;min-height:28px}
+.vide{margin:auto;color:var(--doux);text-align:center;padding:30px}
+</style>
+</head>
+<body>
+<header>
+  <b>Brainstorming</b>
+  <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
+  <form id="nf"><input id="ncol" placeholder="Nom de la colonne"> <button>Ajouter une colonne</button></form>
+  <span id="votes"></span>
+</header>
+<div id="msg" role="status"></div>
+<main id="board"></main>
+
+<script>
+const MAX_VOTES = 3;           // votes par personne
+let recs = [], cols = [], me = localStorage.getItem('bs_me') || '';
+const $ = s => document.querySelector(s);
+const el = (t, c, x) => { const e = document.createElement(t); if (c) e.className = c; if (x != null) e.textContent = x; return e; };
+const voters = r => (r.Votants || '').split(',').map(s => s.trim()).filter(Boolean);
+const T = () => grist.selectedTable;
+const upd = (id, f) => T().update({ id, fields: grist.mapColumnNamesBack(f) });
+const say = t => { $('#msg').textContent = t || ''; if (t) setTimeout(() => $('#msg').textContent = '', 4000); };
+const mesVotes = () => recs.filter(r => voters(r).includes(me)).length;
+
+grist.ready({
+  requiredAccess: 'read table',
+  columns: [
+    { name: 'Texte', title: 'Texte', type: 'Text' },
+    { name: 'Colonne', title: 'Colonne', type: 'Text' },
+    { name: 'Auteur', title: 'Auteur', type: 'Text' },
+    { name: 'Votants', title: 'Votants', type: 'Text' }
+  ]
+});
+grist.onRecords(rows => { recs = grist.mapColumnNames(rows) || []; render(); });
+grist.onOptions(o => { cols = (o && o.cols) || []; render(); });
+
+$('#pseudo').value = me;
+$('#pseudo').addEventListener('change', e => {
+  me = e.target.value.replace(/,/g, ' ').trim();
+  localStorage.setItem('bs_me', me); render();
+});
+$('#nf').addEventListener('submit', e => {
+  e.preventDefault();
+  const n = $('#ncol').value.trim();
+  if (!n || allCols().includes(n)) return;
+  cols = [...cols, n]; grist.setOption('cols', cols);
+  $('#ncol').value = ''; render();
+});
+
+function allCols() {
+  const extra = [...new Set(recs.map(r => r.Colonne).filter(Boolean))].filter(c => !cols.includes(c));
+  return [...cols, ...extra];
+}
+
+function render() {
+  const board = $('#board'); board.textContent = '';
+  $('#votes').textContent = me ? `Votes restants : ${MAX_VOTES - mesVotes()} / ${MAX_VOTES}` : '';
+  const names = allCols();
+  if (!names.length) { board.append(el('div', 'vide', 'Aucune colonne. Crée la première avec « Ajouter une colonne ».')); return; }
+  names.forEach((name, i) => {
+    const mine = recs.filter(r => (r.Colonne || names[0]) === name)
+      .sort((a, b) => voters(b).length - voters(a).length);
+    const col = el('section', 'col');
+    const h = el('h2', null, name); h.append(el('span', null, mine.length));
+    const list = el('div', 'cards');
+    col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
+    col.addEventListener('dragleave', () => col.classList.remove('over'));
+    col.addEventListener('drop', e => {
+      e.preventDefault(); col.classList.remove('over');
+      const id = Number(e.dataTransfer.getData('text/plain'));
+      if (id) upd(id, { Colonne: name });
+    });
+    mine.forEach(r => list.append(card(r)));
+
+    const ajout = el('div', 'ajout');
+    const ta = el('textarea'); ta.placeholder = 'Nouvelle idée'; ta.setAttribute('aria-label', 'Nouvelle idée dans ' + name);
+    const b = el('button', null, 'Ajouter');
+    b.onclick = () => {
+      if (!me) { $('#pseudo').focus(); return say('Indique ton prénom avant d\u2019ajouter une idée.'); }
+      const t = ta.value.trim(); if (!t) return;
+      T().create({ fields: grist.mapColumnNamesBack({ Texte: t, Colonne: name, Auteur: me, Votants: '' }) });
+      ta.value = '';
+    };
+    ajout.append(ta, b);
+    col.append(h, list, ajout);
+    board.append(col);
+  });
+}
+
+function card(r) {
+  const c = el('article', 'card'); c.draggable = true;
+  c.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', String(r.id)));
+  c.append(el('p', null, r.Texte || ''));
+  const m = el('div', 'meta'); m.append(el('span', 'de', r.Auteur || ''));
+  const v = voters(r), aVote = v.includes(me);
+  const bv = el('button', 'vote' + (aVote ? ' mine' : ''), '\u25B2 ' + v.length);
+  bv.title = aVote ? 'Retirer mon vote' : 'Voter pour cette idée';
+  bv.onclick = () => {
+    if (!me) { $('#pseudo').focus(); return say('Indique ton prénom avant de voter.'); }
+    if (!aVote && mesVotes() >= MAX_VOTES) return say(`Tu as utilisé tes ${MAX_VOTES} votes. Retire-en un pour voter ici.`);
+    const n = aVote ? v.filter(x => x !== me) : [...v, me];
+    upd(r.id, { Votants: n.join(',') });
+  };
+  m.append(bv);
+  if (r.Auteur && r.Auteur === me) {
+    const s = el('button', 'sup', '\u00D7'); s.title = 'Supprimer mon idée';
+    s.onclick = () => T().destroy(r.id);
+    m.append(s);
+  }
+  c.append(m);
+  return c;
+}
+</script>
+</body>
+</html>
