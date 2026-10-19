@@ -38,9 +38,9 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v3</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v4</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
-  <form id="nf"><input id="ncol" placeholder="Nom de la colonne"> <button>Ajouter une colonne</button></form>
+  <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <span id="votes"></span>
 </header>
 <div id="msg" role="status"></div>
@@ -67,7 +67,7 @@ grist.ready({
   requiredAccess: 'full',
   columns: [
     { name: 'Texte', title: 'Texte', type: 'Text' },
-    { name: 'Colonne', title: 'Colonne', type: 'Text' },
+    { name: 'Colonne', title: 'Catégorie', type: 'Text' },
     { name: 'Auteur', title: 'Auteur', type: 'Text' },
     { name: 'Votants', title: 'Votants', type: 'Text' }
   ]
@@ -97,7 +97,7 @@ function render() {
   const board = $('#board'); board.textContent = '';
   $('#votes').textContent = me ? `Votes restants : ${MAX_VOTES - mesVotes()} / ${MAX_VOTES}` : '';
   const names = allCols();
-  if (!names.length) { board.append(el('div', 'vide', 'Aucune colonne. Crée la première avec « Ajouter une colonne ».')); return; }
+  if (!names.length) { board.append(el('div', 'vide', 'Aucune catégorie. Crée la première avec « Ajouter une catégorie ».')); return; }
   names.forEach((name, i) => {
     const mine = recs.filter(r => (r.Colonne || names[0]) === name)
       .sort((a, b) => voters(b).length - voters(a).length);
