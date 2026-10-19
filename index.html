@@ -38,7 +38,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming</b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v3</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la colonne"> <button>Ajouter une colonne</button></form>
   <span id="votes"></span>
@@ -55,7 +55,12 @@ const voters = r => (r.Votants || '').split(',').map(s => s.trim()).filter(Boole
 const T = () => grist.selectedTable;
 const say = t => { $('#msg').textContent = t || ''; if (t) setTimeout(() => $('#msg').textContent = '', 6000); };
 const erreur = e => say('Écriture impossible : ' + (e && e.message || e));
-const upd = (id, f) => T().update({ id, fields: f }).catch(erreur);
+let map = {};
+const raw = f => Object.fromEntries(Object.entries(f).map(([k, v]) => [map[k], v]));
+const act = async a => grist.docApi.applyUserActions(a(await T().getTableId()));
+const upd = (id, f) => act(t => [['UpdateRecord', t, id, raw(f)]]).catch(erreur);
+const add = f => act(t => [['AddRecord', t, null, raw(f)]]).catch(erreur);
+const del = id => act(t => [['RemoveRecord', t, id]]).catch(erreur);
 const mesVotes = () => recs.filter(r => voters(r).includes(me)).length;
 
 grist.ready({
@@ -67,7 +72,7 @@ grist.ready({
     { name: 'Votants', title: 'Votants', type: 'Text' }
   ]
 });
-grist.onRecords(rows => { recs = grist.mapColumnNames(rows) || []; render(); });
+grist.onRecords((rows, m) => { map = m || {}; recs = grist.mapColumnNames(rows) || []; render(); });
 grist.onOptions(o => { cols = (o && o.cols) || []; render(); });
 
 $('#pseudo').value = me;
@@ -114,7 +119,7 @@ function render() {
     b.onclick = () => {
       if (!me) { $('#pseudo').focus(); return say('Indique ton prénom avant d\u2019ajouter une idée.'); }
       const t = ta.value.trim(); if (!t) return;
-      T().create({ fields: { Texte: t, Colonne: name, Auteur: me, Votants: '' } }).catch(erreur);
+      add({ Texte: t, Colonne: name, Auteur: me, Votants: '' });
       ta.value = '';
     };
     ajout.append(ta, b);
@@ -140,7 +145,7 @@ function card(r) {
   m.append(bv);
   if (r.Auteur && r.Auteur === me) {
     const s = el('button', 'sup', '\u00D7'); s.title = 'Supprimer mon idée';
-    s.onclick = () => T().destroy(r.id).catch(erreur);
+    s.onclick = () => del(r.id);
     m.append(s);
   }
   c.append(m);
