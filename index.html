@@ -27,7 +27,11 @@ button:disabled{background:#9db5b1;cursor:default}
 .fic a{color:var(--accent-f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pj .sup{padding:0 4px}
 .ajoutlien{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
-.ajoutlien input{font:inherit;padding:4px;border:1px solid var(--trait);border-radius:3px}
+.ajoutlien input,.ajoutlien textarea{font:inherit;padding:4px;border:1px solid var(--trait);border-radius:3px}
+.ajoutlien textarea{resize:vertical;min-height:50px}
+#pan2{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px}
+#pan2[hidden]{display:none}
+.boite p{margin:0}
 #pan{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px}
 #pan[hidden]{display:none}
 .boite{background:#fff;border-radius:6px;width:min(720px,100%);max-height:100%;display:flex;flex-direction:column;gap:8px;padding:12px}
@@ -59,7 +63,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v12</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v13</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
@@ -71,6 +75,18 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </header>
 <div id="msg" role="status"></div>
 <main id="board"></main>
+<div id="pan2" hidden>
+  <div class="boite">
+    <div class="bar"><b>Nouvelle séance</b></div>
+    <p id="rz-txt"></p>
+    <label><input type="checkbox" id="rz-cat" checked> Garder les catégories</label>
+    <div class="bar">
+      <button type="button" id="rz-exp">Exporter d’abord</button>
+      <button type="button" id="rz-go">Tout effacer</button>
+      <button type="button" id="rz-no">Annuler</button>
+    </div>
+  </div>
+</div>
 <div id="pan" hidden>
   <div class="boite">
     <div class="bar"><b>Synthèse</b>
@@ -162,7 +178,12 @@ function entete() {
   const go = el('button', null, 'Lancer');
   go.onclick = () => grist.setOption('fin', Date.now() + Math.max(1, Number(mn.value) || 5) * 60000);
   const st = el('button', null, 'Arrêter'); st.onclick = () => grist.setOption('fin', 0);
-  c.append(mn, ' min', go, st);
+  const nv = el('button', null, 'Nouvelle séance');
+  nv.onclick = () => {
+    $('#rz-txt').textContent = `Cette action supprime les ${recs.length} idée(s) du tableau pour tous les participants, remet la phase sur « Écriture » et arrête le minuteur. Pense à exporter la synthèse avant.`;
+    $('#pan2').hidden = false;
+  };
+  c.append(mn, ' min', go, st, nv);
 }
 
 function tick() {
@@ -278,6 +299,20 @@ async function ouvrir(i) {
   catch (e) { erreur(e); }
 }
 
+$('#rz-no').onclick = () => { $('#pan2').hidden = true; };
+$('#rz-exp').onclick = () => { $('#pan2').hidden = true; montre(fmtSortie); };
+$('#rz-go').onclick = async () => {
+  const ids = recs.map(r => r.id), garder = $('#rz-cat').checked ? allCols() : [];
+  try {
+    if (ids.length) await act(t => [['BulkRemoveRecord', t, ids]]);
+    grist.setOption('cols', garder);
+    grist.setOption('phase', 'ecriture');
+    grist.setOption('fin', 0);
+    $('#pan2').hidden = true;
+    say('Nouvelle séance prête.');
+  } catch (e) { erreur(e); }
+};
+
 function allCols() {
   const extra = [...new Set(recs.map(r => r.Colonne).filter(Boolean))].filter(c => !cols.includes(c));
   return [...cols, ...extra];
@@ -323,7 +358,7 @@ function render() {
 function card(r) {
   const c = el('article', 'card'); c.draggable = true;
   c.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', String(r.id)));
-  c.append(el('p', null, r.Texte || ''));
+  const p = el('p', null, r.Texte || ''); c.append(p);
   if (map.PJ) {   // colonne « Pièces jointes » associée
     const mien = !!r.Auteur && r.Auteur === me, pj = ids(r.PJ), z = el('div', 'pj');
     pj.forEach(i => {
@@ -385,6 +420,17 @@ function card(r) {
   };
   if (phase === 'vote') m.append(bv);
   if (r.Auteur && r.Auteur === me) {
+    if (phase !== 'vote') {   // pas de modification pendant le vote
+      const ed = el('button', 'sup', '\u270E'); ed.title = 'Modifier mon idée';
+      ed.onclick = () => {
+        const f = el('div', 'ajoutlien'), ta = el('textarea'), ok = el('button', null, 'Enregistrer'), an = el('button', 'sup', 'Annuler');
+        ta.value = r.Texte || '';
+        ok.onclick = () => { const t = ta.value.trim(); if (t && t !== r.Texte) upd(r.id, { Texte: t }); else render(); };
+        an.onclick = () => render();
+        f.append(ta, ok, an); p.replaceWith(f); ta.focus();
+      };
+      m.append(ed);
+    }
     const s = el('button', 'sup', '\u00D7'); s.title = 'Supprimer mon idée';
     s.onclick = () => del(r.id);
     m.append(s);
