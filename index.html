@@ -26,6 +26,7 @@ button:disabled{background:#9db5b1;cursor:default}
 .fic{display:inline-flex;align-items:center;background:#fff;border:1px solid var(--trait);border-radius:3px;padding:0 4px;max-width:100%}
 .fic a{color:var(--accent-f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pj .sup{padding:0 4px}
+header select{font:inherit;padding:5px 8px;border:1px solid var(--trait);border-radius:4px;background:#fff}
 .ajoutlien{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
 .ajoutlien input,.ajoutlien textarea{font:inherit;padding:4px;border:1px solid var(--trait);border-radius:3px}
 .ajoutlien textarea{resize:vertical;min-height:50px}
@@ -64,9 +65,16 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v14</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v15</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
+  <select id="modele" hidden aria-label="Modèle de catégories">
+    <option value="">Modèle de catégories…</option>
+    <option value="retro">Rétrospective : Bien / À améliorer / Idées</option>
+    <option value="dac">Démarrer / Arrêter / Continuer</option>
+    <option value="ffom">FFOM : Forces, Faiblesses, Opportunités, Menaces</option>
+    <option value="4l">4L : Aimé, Appris, Manqué, Souhaité</option>
+  </select>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
   <span id="ctrl"></span>
   <span id="etat"></span>
@@ -164,6 +172,7 @@ $('#nf').addEventListener('submit', e => {
 function entete() {
   $('#isAnim').checked = anim;
   $('#exp').hidden = !anim;
+  $('#modele').hidden = !anim;
   $('#etat').textContent = 'Phase : ' + PHASES[phase] + (anon ? ' (anonyme)' : '');
   const c = $('#ctrl'); c.textContent = '';
   if (!anim) return;
@@ -233,6 +242,8 @@ function renommer(e, name, names, save) {
   inp.onblur = ok;
 }
 
+const liensDe = r => (r.Liens || '').split('\n').filter(Boolean)
+  .map(l => l.includes('\t') ? l.split('\t') : ['', l]).filter(([, u]) => /^https?:\/\//i.test(u));
 function synthese(fmt) {
   const names = allCols();
   const aut = r => anon ? '' : (r.Auteur || '');
@@ -241,15 +252,18 @@ function synthese(fmt) {
   const l = [];
   if (fmt === 'tableau') {
     const c = s => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ');
-    l.push(['Catégorie', 'Idée', 'Votes', ...(anon ? [] : ['Auteur'])].join('\t'));
+    l.push(['Catégorie', 'Idée', 'Votes', ...(anon ? [] : ['Auteur']), 'Liens'].join('\t'));
     names.forEach(n => dans(n).forEach(r =>
-      l.push([n, c(r.Texte), voters(r).length, ...(anon ? [] : [c(aut(r))])].join('\t'))));
+      l.push([n, c(r.Texte), voters(r).length, ...(anon ? [] : [c(aut(r))]), c(liensDe(r).map(([nm, u]) => (nm ? nm + ' : ' : '') + u).join(' ; '))].join('\t'))));
     return l.join('\n');
   }
   names.forEach(n => {
     const d = dans(n);
     l.push(`${n} (${d.length})`);
-    d.forEach(r => l.push(`- ${r.Texte} [${voters(r).length} vote${voters(r).length > 1 ? 's' : ''}]${aut(r) ? ' \u2014 ' + aut(r) : ''}`));
+    d.forEach(r => {
+      l.push(`- ${r.Texte} [${voters(r).length} vote${voters(r).length > 1 ? 's' : ''}]${aut(r) ? ' \u2014 ' + aut(r) : ''}`);
+      liensDe(r).forEach(([nm, u]) => l.push('    \u21B3 ' + (nm ? nm + ' : ' : '') + u));
+    });
     l.push('');
   });
   return l.join('\n').trim();
@@ -302,6 +316,19 @@ async function ouvrir(i) {
   catch (e) { erreur(e); }
 }
 
+const MODELES = {
+  retro: ['Bien', 'À améliorer', 'Idées'],
+  dac: ['À démarrer', 'À arrêter', 'À continuer'],
+  ffom: ['Forces', 'Faiblesses', 'Opportunités', 'Menaces'],
+  '4l': ['Aimé', 'Appris', 'Manqué', 'Souhaité']
+};
+$('#modele').onchange = e => {
+  const m = MODELES[e.target.value]; e.target.value = '';
+  if (!m) return;
+  const exist = allCols(), nouv = m.filter(c => !exist.includes(c));
+  if (!nouv.length) return say('Ces catégories existent déjà.');
+  cols = [...exist, ...nouv]; grist.setOption('cols', cols); render();
+};
 $('#rz-no').onclick = () => { $('#pan2').hidden = true; };
 $('#rz-exp').onclick = () => { $('#pan2').hidden = true; montre(fmtSortie); };
 $('#rz-go').onclick = async () => {
