@@ -8,7 +8,7 @@
 <style>
 :root{--fond:#eef2f0;--col:#f9fbfa;--encre:#1d2b28;--doux:#5d706b;--accent:#0a7c72;--accent-f:#065a53;--post:#fff6c9;--trait:#d3dcd9}
 *{box-sizing:border-box}
-body{margin:0;font:14px/1.4 "Segoe UI",system-ui,sans-serif;color:var(--encre);background:var(--fond);height:100vh;display:flex;flex-direction:column}
+body{margin:0;font:14px/1.4 "Segoe UI",system-ui,sans-serif;color:var(--encre);background:var(--fond);height:100vh;height:100dvh;display:flex;flex-direction:column}
 header{display:flex;flex-wrap:wrap;gap:10px 16px;align-items:center;padding:10px 14px;background:#fff;border-bottom:1px solid var(--trait)}
 header b{font-size:16px}
 header input{font:inherit;padding:5px 8px;border:1px solid var(--trait);border-radius:4px}
@@ -57,6 +57,27 @@ body.proj .ajout,body.proj .outils,body.proj .card .sup,body.proj .pj .sup,body.
 body.proj .col{flex-basis:340px}
 body.proj .card p{font-size:1.15em}
 body.proj #tps{font-size:1.6em}
+.mv{display:none}
+.mvsel{font:inherit;max-width:100%;padding:3px}
+@media (hover:none),(max-width:700px){.mv{display:inline-block}}
+@media (max-width:700px){
+  body{font-size:15px}
+  header{gap:6px 10px;padding:8px 10px}
+  header input,header select,textarea,.comms input,.ajoutlien input,.mvsel{font-size:16px}
+  #board{flex-direction:column;overflow-x:hidden;overflow-y:auto;align-items:stretch;padding:8px}
+  .col{flex:0 0 auto;max-height:none;width:100%}
+  .cards{overflow:visible}
+  button{min-height:36px}
+  .sup,.rb,.vote{min-width:36px;min-height:36px}
+  .pt{min-width:0;min-height:0;width:26px;height:26px}
+  .col h2 b{cursor:pointer}
+  .col h2 b::before{content:'\25BE  '}
+  .col.repli h2 b::before{content:'\25B8  '}
+  .col.repli .cards,.col.repli .ajout{display:none}
+  .boite{max-height:90vh}
+  #podium{max-height:40vh}
+  .pj{font-size:13px}
+}
 header select{font:inherit;padding:5px 8px;border:1px solid var(--trait);border-radius:4px;background:#fff}
 .ajoutlien{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
 .ajoutlien input,.ajoutlien textarea{font:inherit;padding:4px;border:1px solid var(--trait);border-radius:3px}
@@ -96,7 +117,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v20</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v21</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <select id="modele" hidden aria-label="Modèle de catégories">
@@ -376,6 +397,7 @@ async function ouvrir(i) {
 
 // ---- Réactions et commentaires ----
 const REACTIONS = ['\uD83D\uDC4D', '\u2753'];
+const repliees = new Set();   // catégories repliées (mobile)
 const ouvertes = new Set(), brouillons = {};   // commentaires dépliés, saisies en cours
 let focusId = null;
 const lireReac = r => { try { const o = JSON.parse(r.Reactions || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } };
@@ -614,6 +636,12 @@ function render() {
     const col = el('section', 'col');
     const h = el('h2'); h.append(el('b', null, name), el('span', null, mine.length));
     if (anim) h.append(outils(name, i, names, recs.filter(r => (r.Colonne || names[0]) === name).length));
+    if (repliees.has(name)) col.classList.add('repli');
+    h.querySelector('b').addEventListener('click', () => {
+      if (!matchMedia('(max-width:700px)').matches) return;   // seulement sur petit écran
+      if (repliees.has(name)) repliees.delete(name); else repliees.add(name);
+      render();
+    });
     const list = el('div', 'cards');
     col.addEventListener('dragover', e => { e.preventDefault(); col.classList.add('over'); });
     col.addEventListener('dragleave', () => col.classList.remove('over'));
@@ -720,6 +748,31 @@ function card(r) {
     const n = aVote ? v.filter(x => x !== me) : [...v, me];
     upd(r.id, { Votants: n.join(',') });
   };
+  // Boutons tactiles (visibles seulement sur mobile ou écran tactile) : déplacer et regrouper sans glisser-déposer
+  const lesCats = allCols(), cat = r.Colonne || lesCats[0] || '';
+  const mv = el('button', 'sup mv', '\u21C4'); mv.title = 'Déplacer vers une autre catégorie';
+  mv.onclick = () => {
+    const sel = el('select', 'mvsel');
+    sel.append(new Option('Déplacer vers…', ''));
+    lesCats.filter(n => n !== cat).forEach(n => sel.append(new Option(n, n)));
+    sel.onchange = () => { if (sel.value) upd(r.id, r.Groupe ? { Colonne: sel.value, Groupe: '' } : { Colonne: sel.value }); };
+    sel.onblur = () => render();
+    mv.replaceWith(sel); sel.focus();
+  };
+  m.append(mv);
+  if (map.Groupe && phase === 'decouverte') {
+    const gp = el('button', 'sup mv', '\u2295'); gp.title = 'Regrouper avec une autre idée';
+    gp.onclick = () => {
+      const sel = el('select', 'mvsel');
+      sel.append(new Option('Regrouper avec…', ''));
+      recs.filter(x => visible(x) && x.id !== r.id && (x.Colonne || lesCats[0]) === cat)
+        .forEach(x => sel.append(new Option((x.Texte || '').slice(0, 40), String(x.id))));
+      sel.onchange = () => { if (sel.value) grouper(r.id, Number(sel.value)); };
+      sel.onblur = () => render();
+      gp.replaceWith(sel); sel.focus();
+    };
+    m.append(gp);
+  }
   if (phase === 'vote') m.append(bv);
   else if (phase === 'resultats') m.append(el('span', null, '\u25B2 ' + v.length));
   if (r.Auteur && r.Auteur === me) {
