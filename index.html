@@ -26,6 +26,11 @@ button:disabled{background:#9db5b1;cursor:default}
 .fic{display:inline-flex;align-items:center;background:#fff;border:1px solid var(--trait);border-radius:3px;padding:0 4px;max-width:100%}
 .fic a{color:var(--accent-f);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pj .sup{padding:0 4px}
+.paquet{border:2px dashed var(--accent);border-radius:6px;padding:6px;display:flex;flex-direction:column;gap:6px;background:rgba(10,124,114,.06)}
+.paquet::before{content:'Paquet \00B7  ' attr(data-n) ' idées';font-size:11px;color:var(--doux)}
+.card.cible{outline:2px solid var(--accent);outline-offset:1px}
+.palette{display:inline-flex;gap:3px;align-items:center}
+.pt{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.35);padding:0}
 header select{font:inherit;padding:5px 8px;border:1px solid var(--trait);border-radius:4px;background:#fff}
 .ajoutlien{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
 .ajoutlien input,.ajoutlien textarea{font:inherit;padding:4px;border:1px solid var(--trait);border-radius:3px}
@@ -65,7 +70,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v15</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v16</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <select id="modele" hidden aria-label="Modèle de catégories">
@@ -139,7 +144,9 @@ grist.ready({
     { name: 'Auteur', title: 'Auteur', type: 'Text' },
     { name: 'Votants', title: 'Votants', type: 'Text' },
     { name: 'PJ', title: 'Pièces jointes', type: 'Attachments', optional: true },
-    { name: 'Liens', title: 'Liens (documents)', type: 'Text', optional: true }
+    { name: 'Liens', title: 'Liens (documents)', type: 'Text', optional: true },
+    { name: 'Couleur', title: 'Couleur', type: 'Text', optional: true },
+    { name: 'Groupe', title: 'Groupe (paquets)', type: 'Text', optional: true }
   ]
 });
 grist.onRecords((rows, m) => { map = m || {}; recs = grist.mapColumnNames(rows) || []; render(); });
@@ -316,6 +323,37 @@ async function ouvrir(i) {
   catch (e) { erreur(e); }
 }
 
+const COULEURS = { jaune: '#fff6c9', rose: '#ffd9e4', bleu: '#d6ebff', vert: '#d9f2d3', orange: '#ffe2c2' };
+
+// Dépose la carte src sur la carte cible : elles forment un paquet (champ Groupe commun)
+function grouper(srcId, cibleId) {
+  if (!srcId || srcId === cibleId) return;
+  if (phase !== 'decouverte') return say('Le regroupement se fait en phase Découverte.');
+  const s = recs.find(r => r.id === srcId), t = recs.find(r => r.id === cibleId);
+  if (!s || !t) return;
+  const g = t.Groupe || ('g' + t.id), cat = t.Colonne || allCols()[0] || '';
+  act(tb => {
+    const a = [['UpdateRecord', tb, s.id, raw({ Groupe: g, Colonne: cat })]];
+    if (!t.Groupe) a.push(['UpdateRecord', tb, t.id, raw({ Groupe: g })]);
+    return a;
+  }).catch(erreur);
+}
+
+// Regroupe les cartes d'une catégorie : un paquet = plusieurs cartes de même Groupe
+function unites(list) {
+  const m = new Map(), u = [];
+  list.forEach(r => {
+    const g = map.Groupe && r.Groupe;
+    if (g) {
+      if (!m.has(g)) { const x = { cards: [] }; m.set(g, x); u.push(x); }
+      m.get(g).cards.push(r);
+    } else u.push({ cards: [r] });
+  });
+  const score = x => x.cards.reduce((s, r) => s + voters(r).length, 0);
+  const rang = x => Math.min(...x.cards.map(r => r.id));
+  return u.sort((a, b) => phase === 'vote' ? score(b) - score(a) || rang(a) - rang(b) : rang(a) - rang(b));
+}
+
 const MODELES = {
   retro: ['Bien', 'À améliorer', 'Idées'],
   dac: ['À démarrer', 'À arrêter', 'À continuer'],
@@ -387,9 +425,17 @@ function render() {
     col.addEventListener('drop', e => {
       e.preventDefault(); col.classList.remove('over');
       const id = Number(e.dataTransfer.getData('text/plain'));
-      if (id) upd(id, { Colonne: name });
+      if (id) {
+        const r0 = recs.find(r => r.id === id);
+        upd(id, r0 && r0.Groupe ? { Colonne: name, Groupe: '' } : { Colonne: name });
+      }
     });
-    mine.forEach(r => list.append(card(r)));
+    unites(mine).forEach(x => {
+      if (x.cards.length < 2) return list.append(card(x.cards[0]));
+      const p = el('div', 'paquet'); p.dataset.n = x.cards.length;
+      x.cards.forEach(r => p.append(card(r)));
+      list.append(p);
+    });
 
     const ajout = el('div', 'ajout');
     const ta = el('textarea'); ta.placeholder = 'Nouvelle idée'; ta.setAttribute('aria-label', 'Nouvelle idée dans ' + name);
@@ -409,6 +455,15 @@ function render() {
 function card(r) {
   const c = el('article', 'card'); c.draggable = true;
   c.addEventListener('dragstart', e => e.dataTransfer.setData('text/plain', String(r.id)));
+  c.style.background = COULEURS[r.Couleur] || COULEURS.jaune;
+  if (map.Groupe) {   // colonne « Groupe » associée : on peut déposer une carte sur une autre
+    c.addEventListener('dragover', e => { e.preventDefault(); e.stopPropagation(); c.classList.add('cible'); });
+    c.addEventListener('dragleave', () => c.classList.remove('cible'));
+    c.addEventListener('drop', e => {
+      e.preventDefault(); e.stopPropagation(); c.classList.remove('cible');
+      grouper(Number(e.dataTransfer.getData('text/plain')), r.id);
+    });
+  }
   const p = el('p', null, r.Texte || ''); c.append(p);
   if (map.PJ) {   // colonne « Pièces jointes » associée
     const mien = !!r.Auteur && r.Auteur === me, pj = ids(r.PJ), z = el('div', 'pj');
@@ -481,6 +536,19 @@ function card(r) {
         f.append(ta, ok, an); p.replaceWith(f); ta.focus();
       };
       m.append(ed);
+    }
+    if (map.Couleur) {   // colonne « Couleur » associée
+      const pal = el('button', 'sup', '\uD83C\uDFA8'); pal.title = 'Couleur du post-it';
+      pal.onclick = () => {
+        const z = el('span', 'palette');
+        Object.entries(COULEURS).forEach(([k, v]) => {
+          const b = el('button', 'pt'); b.style.background = v; b.title = k; b.setAttribute('aria-label', k);
+          b.onclick = () => upd(r.id, { Couleur: k });
+          z.append(b);
+        });
+        pal.replaceWith(z);
+      };
+      m.append(pal);
     }
     const s = el('button', 'sup', '\u00D7'); s.title = 'Supprimer mon idée';
     s.onclick = () => del(r.id);
