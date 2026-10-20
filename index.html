@@ -96,7 +96,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v19</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v20</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <select id="modele" hidden aria-label="Modèle de catégories">
@@ -182,6 +182,7 @@ grist.ready({
 });
 grist.onRecords((rows, m) => { map = m || {}; recs = grist.mapColumnNames(rows) || []; render(); });
 grist.onOptions(o => {
+  if (session) return;   // l'état vient de la table Session
   o = o || {};
   cols = o.cols || [];
   phase = PHASES[o.phase] ? o.phase : 'ecriture';
@@ -203,7 +204,7 @@ $('#nf').addEventListener('submit', e => {
   e.preventDefault();
   const n = $('#ncol').value.trim();
   if (!n || allCols().includes(n)) return;
-  cols = [...cols, n]; grist.setOption('cols', cols);
+  cols = [...cols, n]; opt('cols', cols);
   $('#ncol').value = ''; render();
 });
 
@@ -216,18 +217,18 @@ function entete() {
   if (!anim) return;
   Object.entries(PHASES).forEach(([k, n]) => {
     const b = el('button', null, n); b.disabled = k === phase;
-    b.onclick = () => grist.setOption('phase', k);
+    b.onclick = () => opt('phase', k);
     c.append(b);
   });
   const l = el('label'), cb = el('input'); cb.type = 'checkbox'; cb.checked = anon;
-  cb.onchange = () => grist.setOption('anon', cb.checked);
+  cb.onchange = () => opt('anon', cb.checked);
   l.append(cb, ' Anonyme'); c.append(l);
   const mn = el('input'); mn.type = 'number'; mn.min = 1; mn.max = 120; mn.style.width = '60px';
   mn.value = localStorage.getItem('bs_min') || 5; mn.title = 'Durée en minutes';
   mn.oninput = () => localStorage.setItem('bs_min', mn.value);
   const go = el('button', null, 'Lancer');
-  go.onclick = () => grist.setOption('fin', Date.now() + Math.max(1, Number(mn.value) || 5) * 60000);
-  const st = el('button', null, 'Arrêter'); st.onclick = () => grist.setOption('fin', 0);
+  go.onclick = () => opt('fin', Date.now() + Math.max(1, Number(mn.value) || 5) * 60000);
+  const st = el('button', null, 'Arrêter'); st.onclick = () => opt('fin', 0);
   const nv = el('button', null, 'Nouvelle séance');
   nv.onclick = () => {
     $('#rz-txt').textContent = `Les ${recs.length} idée(s) seront copiées dans la table « Archive », puis supprimées du tableau pour tous les participants. La phase repasse sur « Écriture » et le minuteur s\u2019arrête.`;
@@ -249,7 +250,7 @@ setInterval(tick, 1000);
 function outils(name, i, names, total) {
   const o = el('span', 'outils');
   const mk = (txt, titre, fn, off) => { const b = el('button', 'sup', txt); b.title = titre; b.disabled = !!off; b.onclick = fn; return b; };
-  const save = arr => { cols = arr; grist.setOption('cols', arr); render(); };
+  const save = arr => { cols = arr; opt('cols', arr); render(); };
   const echange = d => { const a = [...names]; [a[i + d], a[i]] = [a[i], a[i + d]]; save(a); };
   o.append(
     mk('\u25C0', 'Déplacer à gauche', () => echange(-1), i === 0),
@@ -465,6 +466,50 @@ const proj = on => {
 $('#projBtn').onclick = () => proj(!document.body.classList.contains('proj'));
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('proj')) proj(false); });
 
+// ---- État de la séance : table « Session » si elle existe, sinon options du widget ----
+// Phase, anonymat, minuteur et catégories sont réservés à l'animateur : si la table Session est
+// protégée par les règles d'accès Grist, seuls les propriétaires peuvent la modifier.
+let session = false, rowId = null, lastSess = '', file = Promise.resolve();
+async function chargerSession() {
+  let t;
+  try { t = await grist.docApi.fetchTable('Session'); } catch (e) { return false; }   // pas de table : mode options
+  session = true;
+  const vide = !(t.id && t.id.length);
+  rowId = vide ? null : t.id[0];
+  const g = c => (vide || !t[c]) ? '' : (t[c][0] == null ? '' : t[c][0]);
+  let c = []; try { c = JSON.parse(g('Categories') || '[]'); } catch (e) { c = []; }
+  const sig = JSON.stringify([c, g('Phase'), g('Anonyme'), g('Fin')]);
+  if (sig === lastSess) return true;
+  lastSess = sig;
+  cols = Array.isArray(c) ? c : [];
+  phase = PHASES[g('Phase')] ? g('Phase') : 'ecriture';
+  anon = g('Anonyme') === 'oui';
+  fin = Number(g('Fin')) || 0;
+  render();
+  return true;
+}
+async function ecrire(k, v) {
+  const champ = { phase: 'Phase', anon: 'Anonyme', fin: 'Fin', cols: 'Categories' }[k];
+  const val = k === 'cols' ? JSON.stringify(v) : k === 'anon' ? (v ? 'oui' : '') : String(v);
+  await grist.docApi.applyUserActions([rowId
+    ? ['UpdateRecord', 'Session', rowId, { [champ]: val }]
+    : ['AddRecord', 'Session', null, { [champ]: val }]]);
+  await chargerSession();
+}
+// Les écritures sont mises en file pour éviter de créer deux lignes Session
+const opt = (k, v) => {
+  if (!session) return grist.setOption(k, v);
+  file = file.then(() => ecrire(k, v)).catch(e => {
+    const m = String((e && e.message) || e);
+    say(/access|rule|denied|permission|blocked/i.test(m) ? 'Cette commande est réservée aux animateurs.' : 'Écriture impossible : ' + m);
+    lastSess = '';
+    return chargerSession();   // réaligner l'affichage sur l'état réel
+  });
+  return file;
+};
+chargerSession();
+setInterval(() => { if (session) chargerSession(); }, 2500);
+
 const COULEURS = { jaune: '#fff6c9', rose: '#ffd9e4', bleu: '#d6ebff', vert: '#d9f2d3', orange: '#ffe2c2' };
 
 // Dépose la carte src sur la carte cible : elles forment un paquet (champ Groupe commun)
@@ -507,7 +552,7 @@ $('#modele').onchange = e => {
   if (!m) return;
   const exist = allCols(), nouv = m.filter(c => !exist.includes(c));
   if (!nouv.length) return say('Ces catégories existent déjà.');
-  cols = [...exist, ...nouv]; grist.setOption('cols', cols); render();
+  cols = [...exist, ...nouv]; opt('cols', cols); render();
 };
 $('#rz-no').onclick = () => { $('#pan2').hidden = true; };
 $('#rz-exp').onclick = () => { $('#pan2').hidden = true; montre(fmtSortie); };
@@ -544,9 +589,9 @@ $('#rz-go').onclick = async () => {
     }
     // archivage et suppression dans une seule opération : tout passe ou rien
     if (lignes.length) await act(t => [...ajout, ['BulkRemoveRecord', t, lignes]]);
-    grist.setOption('cols', garder);
-    grist.setOption('phase', 'ecriture');
-    grist.setOption('fin', 0);
+    opt('cols', garder);
+    opt('phase', 'ecriture');
+    opt('fin', 0);
     $('#pan2').hidden = true; $('#rz-nom').value = '';
     say(lignes.length ? `Séance « ${nom} » archivée (${lignes.length} idée${lignes.length > 1 ? 's' : ''}).` : 'Nouvelle séance prête.');
   } catch (e) { erreur(e); }
