@@ -31,6 +31,32 @@ button:disabled{background:#9db5b1;cursor:default}
 .card.cible{outline:2px solid var(--accent);outline-offset:1px}
 .palette{display:inline-flex;gap:3px;align-items:center}
 .pt{width:16px;height:16px;border-radius:50%;border:1px solid rgba(0,0,0,.35);padding:0}
+.reac{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px;align-items:center}
+.rb{background:rgba(255,255,255,.7);color:var(--encre);border:1px solid var(--trait);padding:1px 6px}
+.rb:hover{background:#fff}
+.rb.mine{background:var(--accent);color:#fff}
+.rb.mine:hover{background:var(--accent-f)}
+.comms{flex-basis:100%;display:flex;flex-direction:column;gap:3px;font-size:12px}
+.comm{background:rgba(255,255,255,.65);border-radius:3px;padding:2px 4px;display:flex;gap:4px;align-items:baseline}
+.comm span{flex:1;overflow-wrap:anywhere}
+.comms input{font:inherit;padding:3px;border:1px solid var(--trait);border-radius:3px}
+#podium{padding:12px 14px 0;max-height:50vh;overflow:auto}
+#podium[hidden]{display:none}
+#podium h2{margin:0 0 8px}
+.pod{display:flex;gap:12px;align-items:center;background:#fff;border:1px solid var(--trait);border-left:8px solid var(--trait);border-radius:6px;padding:8px 12px;margin-bottom:8px}
+.pod.r1{border-left-color:#d4a017;font-size:1.25em}
+.pod.r2{border-left-color:#9aa5a8;font-size:1.1em}
+.pod.r3{border-left-color:#b87333}
+.pod .med{font-size:1.8em}
+.pod .tx{flex:1;overflow-wrap:anywhere}
+.pod small{display:block;color:var(--doux)}
+.pod .n{font-weight:600;white-space:nowrap}
+body.proj{font-size:20px}
+body.proj header>*:not(b):not(#etat):not(#tps):not(#votes):not(#projBtn){display:none}
+body.proj .ajout,body.proj .outils,body.proj .card .sup,body.proj .pj .sup,body.proj .pt{display:none}
+body.proj .col{flex-basis:340px}
+body.proj .card p{font-size:1.15em}
+body.proj #tps{font-size:1.6em}
 header select{font:inherit;padding:5px 8px;border:1px solid var(--trait);border-radius:4px;background:#fff}
 .ajoutlien{display:flex;flex-direction:column;gap:4px;margin-bottom:6px}
 .ajoutlien input,.ajoutlien textarea{font:inherit;padding:4px;border:1px solid var(--trait);border-radius:3px}
@@ -70,7 +96,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v16</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v17</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <select id="modele" hidden aria-label="Modèle de catégories">
@@ -85,9 +111,11 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
   <span id="etat"></span>
   <span id="tps"></span>
   <button type="button" id="exp" hidden>Exporter</button>
+  <button type="button" id="projBtn">Projection</button>
   <span id="votes"></span>
 </header>
 <div id="msg" role="status"></div>
+<section id="podium" hidden aria-live="polite"></section>
 <main id="board"></main>
 <div id="pan2" hidden>
   <div class="boite">
@@ -117,7 +145,8 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 <script>
 const MAX_VOTES = 3;           // votes par personne
 let recs = [], cols = [], me = localStorage.getItem('bs_me') || '';
-const PHASES = { ecriture: 'Écriture', decouverte: 'Découverte', vote: 'Vote' };
+const PHASES = { ecriture: 'Écriture', decouverte: 'Découverte', vote: 'Vote', resultats: 'Résultats' };
+const classe = () => phase === 'vote' || phase === 'resultats';   // idées classées par votes
 let fin = 0; // heure de fin du minuteur (ms), 0 = arrêté
 let phase = 'ecriture', anon = false, anim = localStorage.getItem('bs_anim') === '1';
 // En phase Écriture, chacun ne voit que ses propres idées
@@ -146,7 +175,9 @@ grist.ready({
     { name: 'PJ', title: 'Pièces jointes', type: 'Attachments', optional: true },
     { name: 'Liens', title: 'Liens (documents)', type: 'Text', optional: true },
     { name: 'Couleur', title: 'Couleur', type: 'Text', optional: true },
-    { name: 'Groupe', title: 'Groupe (paquets)', type: 'Text', optional: true }
+    { name: 'Groupe', title: 'Groupe (paquets)', type: 'Text', optional: true },
+    { name: 'Reactions', title: 'Réactions', type: 'Text', optional: true },
+    { name: 'Commentaires', title: 'Commentaires', type: 'Text', optional: true }
   ]
 });
 grist.onRecords((rows, m) => { map = m || {}; recs = grist.mapColumnNames(rows) || []; render(); });
@@ -323,6 +354,98 @@ async function ouvrir(i) {
   catch (e) { erreur(e); }
 }
 
+// ---- Réactions et commentaires ----
+const REACTIONS = ['\uD83D\uDC4D', '\u2753'];
+const ouvertes = new Set(), brouillons = {};   // commentaires dépliés, saisies en cours
+let focusId = null;
+const lireReac = r => { try { const o = JSON.parse(r.Reactions || '{}'); return o && typeof o === 'object' ? o : {}; } catch (e) { return {}; } };
+const lireComm = r => (r.Commentaires || '').split('\n').filter(Boolean)
+  .map(l => { const i = l.indexOf('\t'); return i < 0 ? ['', l] : [l.slice(0, i), l.slice(i + 1)]; });
+const ecrireComm = arr => arr.map(([a, t]) => a + '\t' + t).join('\n');
+
+function reagir(r) {
+  const z = el('div', 'reac');
+  if (map.Reactions) {
+    const o = lireReac(r);
+    REACTIONS.forEach(e => {
+      const qui = Array.isArray(o[e]) ? o[e] : [], aMoi = qui.includes(me);
+      const b = el('button', 'rb' + (aMoi ? ' mine' : ''), e + (qui.length ? ' ' + qui.length : ''));
+      b.title = qui.length && !anon ? qui.join(', ') : '';
+      b.onclick = () => {
+        if (!me) { $('#pseudo').focus(); return say('Indique ton prénom avant de réagir.'); }
+        upd(r.id, { Reactions: JSON.stringify({ ...o, [e]: aMoi ? qui.filter(x => x !== me) : [...qui, me] }) });
+      };
+      z.append(b);
+    });
+  }
+  if (map.Commentaires) {
+    const cm = lireComm(r), bc = el('button', 'rb', '\uD83D\uDCAC' + (cm.length ? ' ' + cm.length : ''));
+    bc.title = 'Commentaires';
+    bc.onclick = () => { if (ouvertes.has(r.id)) ouvertes.delete(r.id); else ouvertes.add(r.id); render(); };
+    z.append(bc);
+    if (ouvertes.has(r.id)) {
+      const lst = el('div', 'comms');
+      cm.forEach(([au, tx], k) => {
+        const li = el('div', 'comm'), nom = anon ? (au === me ? 'Moi' : '') : au;
+        li.append(el('b', null, nom ? nom + ' :' : ''), el('span', null, tx));
+        if (me && au === me) {
+          const x = el('button', 'sup', '\u00D7'); x.title = 'Supprimer mon commentaire';
+          x.onclick = () => upd(r.id, { Commentaires: ecrireComm(cm.filter((_, j) => j !== k)) });
+          li.append(x);
+        }
+        lst.append(li);
+      });
+      const inp = el('input'); inp.placeholder = 'Ajouter un commentaire (Entrée)'; inp.value = brouillons[r.id] || '';
+      inp.oninput = () => { brouillons[r.id] = inp.value; };
+      inp.onfocus = () => { focusId = r.id; };
+      inp.onblur = () => { if (focusId === r.id) focusId = null; };
+      inp.onkeydown = ev => {
+        if (ev.key !== 'Enter') return;
+        const t = inp.value.trim().replace(/[\t\r\n]+/g, ' ');
+        if (!t) return;
+        if (!me) { $('#pseudo').focus(); return say('Indique ton prénom avant de commenter.'); }
+        delete brouillons[r.id];
+        upd(r.id, { Commentaires: ecrireComm([...cm, [me, t]]) });
+      };
+      lst.append(inp); z.append(lst);
+      if (focusId === r.id) setTimeout(() => inp.focus(), 0);
+    }
+  }
+  return z;
+}
+
+// ---- Podium (phase Résultats) ----
+function podium() {
+  const p = $('#podium'); p.textContent = '';
+  p.hidden = phase !== 'resultats';
+  if (phase !== 'resultats') return;
+  p.append(el('h2', null, 'Résultats du vote'));
+  const tri = recs.filter(r => voters(r).length).sort((a, b) => voters(b).length - voters(a).length || a.id - b.id);
+  if (!tri.length) { p.append(el('p', null, 'Aucun vote enregistré.')); return; }
+  const lignes = []; let prec = -1, rang = 0;
+  tri.forEach((r, k) => {
+    const v = voters(r).length;
+    if (v !== prec) { rang = k + 1; prec = v; }   // ex æquo : même rang
+    if (rang <= 3) lignes.push([rang, r, v]);
+  });
+  const noms = allCols();
+  lignes.forEach(([rg, r, v]) => {
+    const d = el('div', 'pod r' + rg), tx = el('div', 'tx');
+    const info = [r.Colonne || noms[0] || '', anon ? '' : (r.Auteur || '')].filter(Boolean).join(' \u00B7 ');
+    tx.append(el('span', null, r.Texte || ''), el('small', null, info));
+    d.append(el('span', 'med', ['', '\uD83E\uDD47', '\uD83E\uDD48', '\uD83E\uDD49'][rg]), tx, el('span', 'n', v + ' vote' + (v > 1 ? 's' : '')));
+    p.append(d);
+  });
+}
+
+// ---- Mode projection (affichage local, propre à chaque poste) ----
+const proj = on => {
+  document.body.classList.toggle('proj', on);
+  $('#projBtn').textContent = on ? 'Quitter la projection' : 'Projection';
+};
+$('#projBtn').onclick = () => proj(!document.body.classList.contains('proj'));
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && document.body.classList.contains('proj')) proj(false); });
+
 const COULEURS = { jaune: '#fff6c9', rose: '#ffd9e4', bleu: '#d6ebff', vert: '#d9f2d3', orange: '#ffe2c2' };
 
 // Dépose la carte src sur la carte cible : elles forment un paquet (champ Groupe commun)
@@ -351,7 +474,7 @@ function unites(list) {
   });
   const score = x => x.cards.reduce((s, r) => s + voters(r).length, 0);
   const rang = x => Math.min(...x.cards.map(r => r.id));
-  return u.sort((a, b) => phase === 'vote' ? score(b) - score(a) || rang(a) - rang(b) : rang(a) - rang(b));
+  return u.sort((a, b) => classe() ? score(b) - score(a) || rang(a) - rang(b) : rang(a) - rang(b));
 }
 
 const MODELES = {
@@ -409,13 +532,13 @@ function allCols() {
 
 function render() {
   const board = $('#board'); board.textContent = '';
-  entete(); tick();
+  entete(); tick(); podium();
   $('#votes').textContent = me && phase === 'vote' ? `Votes restants : ${MAX_VOTES - mesVotes()} / ${MAX_VOTES}` : '';
   const names = allCols();
   if (!names.length) { board.append(el('div', 'vide', 'Aucune catégorie. Crée la première avec « Ajouter une catégorie ».')); return; }
   names.forEach((name, i) => {
     const mine = recs.filter(r => visible(r) && (r.Colonne || names[0]) === name)
-      .sort((a, b) => phase === 'vote' ? voters(b).length - voters(a).length : a.id - b.id);
+      .sort((a, b) => classe() ? voters(b).length - voters(a).length : a.id - b.id);
     const col = el('section', 'col');
     const h = el('h2'); h.append(el('b', null, name), el('span', null, mine.length));
     if (anim) h.append(outils(name, i, names, recs.filter(r => (r.Colonne || names[0]) === name).length));
@@ -514,6 +637,7 @@ function card(r) {
     }
     if (z.children.length) c.append(z);
   }
+  if (phase !== 'ecriture' && (map.Reactions || map.Commentaires)) c.append(reagir(r));
   const m = el('div', 'meta'); m.append(el('span', 'de', anon ? (r.Auteur === me ? 'Moi' : '') : (r.Auteur || '')));
   const v = voters(r), aVote = v.includes(me);
   const bv = el('button', 'vote' + (aVote ? ' mine' : ''), '\u25B2 ' + v.length);
@@ -525,8 +649,9 @@ function card(r) {
     upd(r.id, { Votants: n.join(',') });
   };
   if (phase === 'vote') m.append(bv);
+  else if (phase === 'resultats') m.append(el('span', null, '\u25B2 ' + v.length));
   if (r.Auteur && r.Auteur === me) {
-    if (phase !== 'vote') {   // pas de modification pendant le vote
+    if (phase === 'ecriture' || phase === 'decouverte') {   // pas de modification pendant le vote
       const ed = el('button', 'sup', '\u270E'); ed.title = 'Modifier mon idée';
       ed.onclick = () => {
         const f = el('div', 'ajoutlien'), ta = el('textarea'), ok = el('button', null, 'Enregistrer'), an = el('button', 'sup', 'Annuler');
