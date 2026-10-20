@@ -32,6 +32,7 @@ button:disabled{background:#9db5b1;cursor:default}
 #pan2{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px}
 #pan2[hidden]{display:none}
 .boite p{margin:0}
+#rz-nom{font:inherit;padding:6px;border:1px solid var(--trait);border-radius:4px}
 #pan{position:fixed;inset:0;background:rgba(0,0,0,.35);display:flex;align-items:center;justify-content:center;padding:16px}
 #pan[hidden]{display:none}
 .boite{background:#fff;border-radius:6px;width:min(720px,100%);max-height:100%;display:flex;flex-direction:column;gap:8px;padding:12px}
@@ -63,7 +64,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v13</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v14</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <label><input type="checkbox" id="isAnim"> Animateur</label>
@@ -79,10 +80,12 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
   <div class="boite">
     <div class="bar"><b>Nouvelle séance</b></div>
     <p id="rz-txt"></p>
+    <input id="rz-nom" placeholder="Nom de la séance ou du groupe (obligatoire)" aria-label="Nom de la séance">
+
     <label><input type="checkbox" id="rz-cat" checked> Garder les catégories</label>
     <div class="bar">
       <button type="button" id="rz-exp">Exporter d’abord</button>
-      <button type="button" id="rz-go">Tout effacer</button>
+      <button type="button" id="rz-go">Archiver et vider</button>
       <button type="button" id="rz-no">Annuler</button>
     </div>
   </div>
@@ -180,7 +183,7 @@ function entete() {
   const st = el('button', null, 'Arrêter'); st.onclick = () => grist.setOption('fin', 0);
   const nv = el('button', null, 'Nouvelle séance');
   nv.onclick = () => {
-    $('#rz-txt').textContent = `Cette action supprime les ${recs.length} idée(s) du tableau pour tous les participants, remet la phase sur « Écriture » et arrête le minuteur. Pense à exporter la synthèse avant.`;
+    $('#rz-txt').textContent = `Les ${recs.length} idée(s) seront copiées dans la table « Archive », puis supprimées du tableau pour tous les participants. La phase repasse sur « Écriture » et le minuteur s\u2019arrête.`;
     $('#pan2').hidden = false;
   };
   c.append(mn, ' min', go, st, nv);
@@ -302,14 +305,35 @@ async function ouvrir(i) {
 $('#rz-no').onclick = () => { $('#pan2').hidden = true; };
 $('#rz-exp').onclick = () => { $('#pan2').hidden = true; montre(fmtSortie); };
 $('#rz-go').onclick = async () => {
-  const ids = recs.map(r => r.id), garder = $('#rz-cat').checked ? allCols() : [];
+  const nom = $('#rz-nom').value.trim(), lignes = recs.map(r => r.id), noms = allCols();
+  const garder = $('#rz-cat').checked ? noms : [];
   try {
-    if (ids.length) await act(t => [['BulkRemoveRecord', t, ids]]);
+    let ajout = [];
+    if (lignes.length) {
+      if (!nom) return say('Indique un nom de séance ou de groupe pour l\u2019archive.');
+      let tab;
+      try { tab = await grist.docApi.fetchTable('Archive'); }
+      catch (e) { return say('Table « Archive » introuvable : crée-la d\u2019abord.'); }
+      const manque = ['Seance', 'Date', 'Categorie', 'Texte', 'Auteur', 'Votes', 'Liens'].filter(c => !(c in tab));
+      if (manque.length) return say('Colonnes manquantes dans Archive : ' + manque.join(', '));
+      const n = new Date(), jour = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) / 1000;
+      const col = { Seance: [], Date: [], Categorie: [], Texte: [], Auteur: [], Votes: [], Liens: [] };
+      const pj = 'PJ' in tab && !!map.PJ; if (pj) col.PJ = [];
+      recs.forEach(r => {
+        col.Seance.push(nom); col.Date.push(jour); col.Categorie.push(r.Colonne || noms[0] || '');
+        col.Texte.push(r.Texte || ''); col.Auteur.push(anon ? '' : (r.Auteur || ''));
+        col.Votes.push(voters(r).length); col.Liens.push(r.Liens || '');
+        if (pj) col.PJ.push(['L', ...ids(r.PJ)]);
+      });
+      ajout = [['BulkAddRecord', 'Archive', lignes.map(() => null), col]];
+    }
+    // archivage et suppression dans une seule opération : tout passe ou rien
+    if (lignes.length) await act(t => [...ajout, ['BulkRemoveRecord', t, lignes]]);
     grist.setOption('cols', garder);
     grist.setOption('phase', 'ecriture');
     grist.setOption('fin', 0);
-    $('#pan2').hidden = true;
-    say('Nouvelle séance prête.');
+    $('#pan2').hidden = true; $('#rz-nom').value = '';
+    say(lignes.length ? `Séance « ${nom} » archivée (${lignes.length} idée${lignes.length > 1 ? 's' : ''}).` : 'Nouvelle séance prête.');
   } catch (e) { erreur(e); }
 };
 
