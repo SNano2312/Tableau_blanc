@@ -96,7 +96,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 </head>
 <body>
 <header>
-  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v17</small></b>
+  <b>Brainstorming <small style="font-weight:400;color:#5d706b">v19</small></b>
   <label>Prénom <input id="pseudo" size="14" placeholder="Ton prénom"></label>
   <form id="nf"><input id="ncol" placeholder="Nom de la catégorie"> <button>Ajouter une catégorie</button></form>
   <select id="modele" hidden aria-label="Modèle de catégories">
@@ -282,6 +282,19 @@ function renommer(e, name, names, save) {
 
 const liensDe = r => (r.Liens || '').split('\n').filter(Boolean)
   .map(l => l.includes('\t') ? l.split('\t') : ['', l]).filter(([, u]) => /^https?:\/\//i.test(u));
+// Paquets : identifiant interne -> « Paquet n » (seulement les groupes de 2 idées ou plus)
+function paquets() {
+  const m = new Map(), out = new Map();
+  recs.forEach(r => { if (map.Groupe && r.Groupe) { if (!m.has(r.Groupe)) m.set(r.Groupe, []); m.get(r.Groupe).push(r); } });
+  [...m.entries()].filter(([, l]) => l.length > 1)
+    .sort((a, b) => Math.min(...a[1].map(r => r.id)) - Math.min(...b[1].map(r => r.id)))
+    .forEach(([g], i) => out.set(g, 'Paquet ' + (i + 1)));
+  return out;
+}
+// Réactions et commentaires sous forme de texte (export et archive)
+const reacDe = r => { const o = lireReac(r); return REACTIONS.filter(e => Array.isArray(o[e]) && o[e].length).map(e => [e, o[e].length]); };
+const reacTxt = r => reacDe(r).map(([e, n]) => e + ' ' + n).join(' ; ');
+const commTxt = ([a, t]) => (anon || !a ? '' : a + ' : ') + t;
 function synthese(fmt) {
   const names = allCols();
   const aut = r => anon ? '' : (r.Auteur || '');
@@ -289,18 +302,24 @@ function synthese(fmt) {
   const dans = n => recs.filter(r => (r.Colonne || names[0]) === n).sort(tri);
   const l = [];
   if (fmt === 'tableau') {
-    const c = s => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' ');
-    l.push(['Catégorie', 'Idée', 'Votes', ...(anon ? [] : ['Auteur']), 'Liens'].join('\t'));
+    const c = s => String(s == null ? '' : s).replace(/[\t\r\n]+/g, ' '), pq = paquets();
+    l.push(['Catégorie', 'Idée', 'Votes', ...(anon ? [] : ['Auteur']), 'Liens', 'Réactions', 'Commentaires', 'Paquet'].join('\t'));
     names.forEach(n => dans(n).forEach(r =>
-      l.push([n, c(r.Texte), voters(r).length, ...(anon ? [] : [c(aut(r))]), c(liensDe(r).map(([nm, u]) => (nm ? nm + ' : ' : '') + u).join(' ; '))].join('\t'))));
+      l.push([n, c(r.Texte), voters(r).length, ...(anon ? [] : [c(aut(r))]), c(liensDe(r).map(([nm, u]) => (nm ? nm + ' : ' : '') + u).join(' ; ')), c(reacTxt(r)), c(lireComm(r).map(commTxt).join(' | ')), c(pq.get(r.Groupe) || '')].join('\t'))));
     return l.join('\n');
   }
   names.forEach(n => {
-    const d = dans(n);
+    const d = unites(dans(n), true).flatMap(x => x.cards), pq = paquets();
+    let dernier = null;
     l.push(`${n} (${d.length})`);
     d.forEach(r => {
-      l.push(`- ${r.Texte} [${voters(r).length} vote${voters(r).length > 1 ? 's' : ''}]${aut(r) ? ' \u2014 ' + aut(r) : ''}`);
+      const nom = pq.get(r.Groupe);
+      if (nom && nom !== dernier) l.push('  ' + nom + ' :');
+      dernier = nom || null;
+      l.push(`${nom ? '  ' : ''}- ${r.Texte} [${voters(r).length} vote${voters(r).length > 1 ? 's' : ''}]${aut(r) ? ' \u2014 ' + aut(r) : ''}`);
       liensDe(r).forEach(([nm, u]) => l.push('    \u21B3 ' + (nm ? nm + ' : ' : '') + u));
+      if (reacDe(r).length) l.push('    ' + reacDe(r).map(([e, n]) => e + ' ' + n).join('  '));
+      lireComm(r).forEach(c => l.push('    \uD83D\uDCAC ' + commTxt(c)));
     });
     l.push('');
   });
@@ -463,7 +482,7 @@ function grouper(srcId, cibleId) {
 }
 
 // Regroupe les cartes d'une catégorie : un paquet = plusieurs cartes de même Groupe
-function unites(list) {
+function unites(list, parVotes) {
   const m = new Map(), u = [];
   list.forEach(r => {
     const g = map.Groupe && r.Groupe;
@@ -474,7 +493,7 @@ function unites(list) {
   });
   const score = x => x.cards.reduce((s, r) => s + voters(r).length, 0);
   const rang = x => Math.min(...x.cards.map(r => r.id));
-  return u.sort((a, b) => classe() ? score(b) - score(a) || rang(a) - rang(b) : rang(a) - rang(b));
+  return u.sort((a, b) => (parVotes || classe()) ? score(b) - score(a) || rang(a) - rang(b) : rang(a) - rang(b));
 }
 
 const MODELES = {
@@ -507,11 +526,19 @@ $('#rz-go').onclick = async () => {
       const n = new Date(), jour = Date.UTC(n.getFullYear(), n.getMonth(), n.getDate()) / 1000;
       const col = { Seance: [], Date: [], Categorie: [], Texte: [], Auteur: [], Votes: [], Liens: [] };
       const pj = 'PJ' in tab && !!map.PJ; if (pj) col.PJ = [];
+      const rea = 'Reactions' in tab, com = 'Commentaires' in tab;   // colonnes facultatives de l'archive
+      if (rea) col.Reactions = [];
+      if (com) col.Commentaires = [];
+      const paq = 'Paquet' in tab, pq = paquets();
+      if (paq) col.Paquet = [];
       recs.forEach(r => {
         col.Seance.push(nom); col.Date.push(jour); col.Categorie.push(r.Colonne || noms[0] || '');
         col.Texte.push(r.Texte || ''); col.Auteur.push(anon ? '' : (r.Auteur || ''));
         col.Votes.push(voters(r).length); col.Liens.push(r.Liens || '');
         if (pj) col.PJ.push(['L', ...ids(r.PJ)]);
+        if (rea) col.Reactions.push(reacTxt(r));
+        if (com) col.Commentaires.push(lireComm(r).map(commTxt).join(' | '));
+        if (paq) col.Paquet.push(pq.get(r.Groupe) || '');
       });
       ajout = [['BulkAddRecord', 'Archive', lignes.map(() => null), col]];
     }
