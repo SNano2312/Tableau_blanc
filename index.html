@@ -165,7 +165,7 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px soli
 
 <script>
 const MAX_VOTES = 3;           // votes par personne
-let recs = [], cols = [], me = localStorage.getItem('bs_me') || '';
+let recs = [], cols = [], me = localStorage.getItem('grist_prenom') || localStorage.getItem('bs_me') || '';
 const PHASES = { ecriture: 'Écriture', decouverte: 'Découverte', vote: 'Vote', resultats: 'Résultats' };
 const classe = () => phase === 'vote' || phase === 'resultats';   // idées classées par votes
 let fin = 0; // heure de fin du minuteur (ms), 0 = arrêté
@@ -215,7 +215,7 @@ grist.onOptions(o => {
 $('#pseudo').value = me;
 $('#pseudo').addEventListener('change', e => {
   me = e.target.value.replace(/,/g, ' ').trim();
-  localStorage.setItem('bs_me', me); render();
+  localStorage.setItem('grist_prenom', me); localStorage.setItem('bs_me', me); render();
 });
 $('#isAnim').addEventListener('change', e => {
   anim = e.target.checked;
